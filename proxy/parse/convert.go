@@ -803,11 +803,36 @@ func ConvertProtocolMap(con map[string]any) []map[string]any {
 	return nodes
 }
 
-// stripInlineTrailingMeta 在不破坏 "#fragment" 的前提下，剥离 URI 主体部分尾部附带的注释（如 " | AL | 2631ms | 3d"）。
+// isValidURIScheme 判断 s 是否为合法的 RFC 3986 URI scheme（[a-zA-Z][a-zA-Z0-9+.-]*）
+func isValidURIScheme(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	if c := s[0]; !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '+' || c == '-' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// stripInlineTrailingMeta 在不破坏 "#fragment" 与协议头 "://" 的前提下，剥离 URI 主体部分尾部附带的注释（如 " | AL | 2631ms | 3d"）。
 // 返回清洗后的链接，以及可选的附加元信息文本（用于默认命名）。
 func stripInlineTrailingMeta(link string) (cleaned, meta string) {
 	head, frag, hasFrag := strings.Cut(link, "#")
-	idx := strings.IndexAny(head, " \t|")
+	searchStart := 0
+	if schemeIdx := strings.Index(head, "://"); schemeIdx >= 0 {
+		searchStart = schemeIdx + 3
+	}
+	relIdx := strings.IndexAny(head[searchStart:], " \t|")
+	if relIdx < 0 {
+		return link, ""
+	}
+	idx := searchStart + relIdx
 	if idx <= 0 {
 		return link, ""
 	}
@@ -858,7 +883,12 @@ func ParseProxyLinksAndConvert(links []string, subURL string) ([]map[string]any,
 		}
 
 		// 1. 含协议头的标准/非标分享链接
-		if schemeIdx := strings.Index(link, "://"); schemeIdx > 0 {
+		if rawScheme, _, hasScheme := strings.Cut(link, "://"); hasScheme {
+			// 前缀不是合法 URI scheme（如行首夹杂非标文本、备注或分隔符的脏行），直接跳过避免误清洗或越界
+			if !isValidURIScheme(rawScheme) {
+				continue
+			}
+
 			cleaned, meta := stripInlineTrailingMeta(link)
 			// 剥离 " | AL | 2631ms | 3d" 后，若原本无 #fragment 则将国家/标签挂到 #，直接交给 Mihomo
 			if meta != "" && !strings.Contains(cleaned, "#") {
@@ -868,7 +898,11 @@ func ParseProxyLinksAndConvert(links []string, subURL string) ([]map[string]any,
 			}
 			link = cleaned
 
-			scheme := strings.ToLower(link[:schemeIdx])
+			rawScheme, afterScheme, ok := strings.Cut(link, "://")
+			if !ok || rawScheme == "" {
+				continue
+			}
+			scheme := strings.ToLower(rawScheme)
 			switch scheme {
 			case "wireguard", "wg":
 				if node := ParseWireGuardURI(link); node != nil {
@@ -893,7 +927,7 @@ func ParseProxyLinksAndConvert(links []string, subURL string) ([]map[string]any,
 				}
 			case "http", "https", "socks", "socks5", "socks5h":
 				// 含明文 user:pass@ 时 Mihomo 会当 Base64 解坏，交给 ConvertsV2RayExtra
-				rest := link[schemeIdx+3:]
+				rest := afterScheme
 				if pathIdx := strings.IndexAny(rest, "/?#"); pathIdx >= 0 {
 					rest = rest[:pathIdx]
 				}

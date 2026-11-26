@@ -188,18 +188,9 @@ func coveredByStdConvert(raw string) bool {
 	if raw == "" {
 		return false
 	}
-	if c := raw[0]; !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
-		return false
-	}
 	i := strings.Index(raw, "://")
-	if i <= 0 {
+	if i <= 0 || !isValidURIScheme(raw[:i]) {
 		return false
-	}
-	for j := 0; j < i; j++ {
-		c := raw[j]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '+' || c == '-' || c == '.') {
-			return false
-		}
 	}
 
 	// 若 '#' 之前存在空格或 '|' 注释（如 "http://1.2.3.4:8080 | AL | 2631ms"），
