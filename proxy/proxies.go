@@ -790,7 +790,14 @@ func processSubscription(
 	out chan<- nodeBatch,
 	batchSize int, // 由 GetProxies 传入，统一管理
 	lim *stageLimiter,
-) bool {
+) (hasValid bool) {
+	// 捕获单订阅拉取/解析阶段的意外 panic，防止单个畸形订阅中断整个程序
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("订阅处理发生 Panic，已跳过该订阅", "URL", urlStr, "panic", r)
+		}
+	}()
+
 	// 预先初始化该 URL 的统计记录。
 	// 防止出现请求 HTTP 200 成功但内容为空白（0节点），
 	// 导致既没有触发 err 也无法进入 proxyChan，从而在报告中彻底消失的问题。
@@ -844,7 +851,6 @@ func processSubscription(
 		rawHits      int // 层 1：解析阶段产出的候选节点数（可能含同订阅内跨解析器重复，见 parse/stream.go）
 		validCount   int // 层 2：通过类型/端口校验、实际发往全局去重队列的节点数（去重前）
 		typeFiltered int
-		hasValid     bool
 	)
 
 	var batch nodeBatch

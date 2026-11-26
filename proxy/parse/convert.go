@@ -1059,6 +1059,12 @@ func ParseProxyLinksAndConvert(links []string, subURL string) ([]map[string]any,
 			wg.Add(1)
 			go func(c []string) {
 				defer wg.Done()
+				// 捕获底层转换库处理畸形链接时可能触发的 panic，仅跳过当前分块避免进程崩溃
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Warn("分块转换代理链接发生 Panic，已跳过该分块", "subURL", subURL, "数量", len(c), "panic", r)
+					}
+				}()
 				data := []byte(strings.Join(c, "\n"))
 
 				var chunkNodes []map[string]any
